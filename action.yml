@@ -1,0 +1,151 @@
+name: Setup sdk enviroment
+description: set up the zephyr sdk
+
+inputs:
+  zephyr-manifest-repository:
+    description: repo act as manifest
+    required: true 
+
+  zephyr-manifest-ref:
+    description: ref same as checkout
+    required: true
+
+  zephyr-manifest-local-path:
+    description: local path to clone repo
+    required: true
+
+  west-root-path:
+    description: the path to execute west
+    required: true
+
+  event-trigger-ref:
+    description: the repo ref need to checkout by event-trigger
+    required: false 
+
+  west-init-cmd:
+    description: cmd to run west init
+    required: true 
+
+  west-build-pre-cmd:
+    description: cmd to run before west build
+    required: false 
+
+  west-build-cmd:
+    description: cmd to run west build
+    required: false 
+
+  west-build-path:
+    description: path to run west build relative to west top
+    required: false 
+
+
+runs:
+  using: "composite"
+  steps:
+    - name: setup sdk
+      shell: bash
+      run: |
+          echo "inputs:"
+          echo "  zephyr-manifest-repository: ${{ inputs.zephyr-manifest-repository }}"
+          echo "  zephyr-manifest-ref: ${{ inputs.zephyr-manifest-ref }}"
+          echo "  zephyr-manifest-local-path: ${{ inputs.zephyr-manifest-local-path }}"
+          echo "  west-root-path: ${{ inputs.west-root-path }}"
+          echo "  event-trigger-ref: ${{ inputs.event-trigger-ref }}"
+          echo "  west-init-cmd: ${{ inputs.west-init-cmd }}"
+          echo "  west-build-pre-cmd: ${{ inputs.west-build-pre-cmd }}"
+          echo "  west-build-cmd: ${{ inputs.west-build-cmd }}"
+          echo "  west-build-path: ${{ inputs.west-build-path }}"
+
+    - name: setup sdk
+      shell: bash
+      run: |
+          echo "zephyr sdk -> zephyr-sdk-${ZSDK_VERSION}"
+          ls /opt/toolchains/zephyr-sdk-${ZSDK_VERSION}
+          /opt/toolchains/zephyr-sdk-${ZSDK_VERSION}/setup.sh -c
+
+    - name: checkout manifest
+      uses: actions/checkout@v4
+      with:
+          repository: ${{ inputs.zephyr-manifest-repository }}
+          path: ${{ inputs.zephyr-manifest-local-path }}
+          ref: ${{ inputs.zephyr-manifest-ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+    - name: west update
+      shell: bash
+      run: |
+        cd ${{ inputs.west-root-path }}
+        west init ${{ inputs.west-init-cmd }}
+        west update
+
+    - name: check need to check other module
+      shell: bash
+      if: ${{ inputs.event-trigger-ref }}
+      run: |
+        echo "GITHUB_REPOSITORY -> $GITHUB_REPOSITORY"
+        cd ${{ inputs.west-root-path }}
+        readarray -t project_list <<< "$(west list)"
+
+        EVENT_PROJECT_PATH=""
+        for i in "${project_list[@]}"
+          do
+              project_detail=($i)
+              project_url=`echo ${project_detail[3]}`
+              repository_name=`echo "$GITHUB_REPOSITORY" | awk -F/ '{print $NF}'`
+              if [[ $project_url == *"${repository_name}" ]]
+              then
+                  EVENT_PROJECT_PATH=`echo ${project_detail[1]}`
+                  echo "EVENT_PROJECT_PATH=$EVENT_PROJECT_PATH" >> $GITHUB_ENV
+                  echo "EVENT_PROJECT_PATH -> $EVENT_PROJECT_PATH"
+                  echo "GITHUB_ENV -> $GITHUB_ENV"
+                  break
+              fi
+          done
+
+          if [ -z "$EVENT_PROJECT_PATH" ]
+          then 
+              echo "logic error, can not find local path for ${GITHB_REPOSITY}"
+              exit 1
+          fi
+
+          cd $EVENT_PROJECT_PATH
+          git remote add origin ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}
+          echo "need to checkout ${GITHUB_REPOSITORY} in ${{ inputs.west-root-path }}/$EVENT_PROJECT_PATH"
+          echo "manifest_rev=$( git rev-parse manifest-rev )" >> $GITHUB_ENV
+
+    - name: check temp module
+      if: ${{ inputs.event-trigger-ref }}
+      uses: actions/checkout@v4
+      with:
+          repository: ${{ github.repository }}
+          path: ${{ format('{0}/{1}',inputs.west-root-path,env.EVENT_PROJECT_PATH) }}
+          ref: ${{ inputs.event-trigger-ref }}
+          fetch-depth: 0
+          persist-credentials: false
+          clean: false
+
+    - name: after check temp module
+      shell: bash
+      if: ${{ inputs.event-trigger-ref }}
+      run: |
+        cd ${{ inputs.west-root-path }}/$EVENT_PROJECT_PATH
+        echo "manifest_rev -> ${manifest_rev}"
+        git branch manifest-rev $manifest_rev
+
+
+    - name: do build
+      if: ${{ inputs.west-build-cmd }}
+      shell: bash
+      run: |
+        cd ${{ inputs.west-root-path }}
+        if [ -n ${{ inputs.west-build-path }} ]
+        then
+          cd ${{ inputs.west-build-path }}
+        fi
+        if [ -n "${{ inputs.west-build-pre-cmd }}" ]
+        then
+          echo "run cmd before build -> ${{ inputs.west-build-pre-cmd }}"
+          ${{ inputs.west-build-pre-cmd }}
+        fi
+        west build ${{ inputs.west-build-cmd }}
