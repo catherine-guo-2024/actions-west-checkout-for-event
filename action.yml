@@ -42,7 +42,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: setup sdk
+    - name: print input
       shell: bash
       run: |
           echo "inputs:"
@@ -56,12 +56,14 @@ runs:
           echo "  west-build-cmd: ${{ inputs.west-build-cmd }}"
           echo "  west-build-path: ${{ inputs.west-build-path }}"
 
+
     - name: setup sdk
       shell: bash
       run: |
           echo "zephyr sdk -> zephyr-sdk-${ZSDK_VERSION}"
           ls /opt/toolchains/zephyr-sdk-${ZSDK_VERSION}
           /opt/toolchains/zephyr-sdk-${ZSDK_VERSION}/setup.sh -c
+
 
     - name: checkout manifest
       uses: actions/checkout@v4
@@ -72,12 +74,14 @@ runs:
           fetch-depth: 0
           persist-credentials: false
 
+
     - name: west update
       shell: bash
       run: |
         cd ${{ inputs.west-root-path }}
         west init ${{ inputs.west-init-cmd }}
         west update
+
 
     - name: check need to check other module
       shell: bash
@@ -114,6 +118,7 @@ runs:
           echo "need to checkout ${GITHUB_REPOSITORY} in ${{ inputs.west-root-path }}/$EVENT_PROJECT_PATH"
           echo "manifest_rev=$( git rev-parse manifest-rev )" >> $GITHUB_ENV
 
+
     - name: check temp module
       if: ${{ inputs.event-trigger-ref }}
       uses: actions/checkout@v4
@@ -124,6 +129,7 @@ runs:
           fetch-depth: 0
           persist-credentials: false
           clean: false
+
 
     - name: after check temp module
       shell: bash
